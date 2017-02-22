@@ -53,6 +53,7 @@ import BackendDump;
 import Config;
 import ComponentReference;
 import DAEUtil;
+import DAEDump;
 import Debug;
 import Error;
 import ErrorExt;
@@ -149,19 +150,57 @@ algorithm
       () := matchcontinue eq
       local
         Integer index;
-        DAE.Exp exp;
-        DAE.ComponentRef cref;
+        DAE.Exp exp, exp1, exp2, exp4;
+        DAE.ComponentRef cref, cref1, cref2;
         list<Operation> rest;
         Operation op;
         list<Operand> operands;
         Operand assignOperand, simVarOperand;
         SimCodeVar.SimVar simVar;
+        list<DAE.Statement> statements;
+
+        list<DAE.Exp> expExpList;
+        DAE.Type type1;
+
         case SimCode.SES_SIMPLE_ASSIGN(index = index, exp = exp, cref = cref) equation
           //operands = {};
           simVar = BaseHashTable.get(cref, crefToSimVarHT);
+
+          //MF
+          //print("  simVar = " + SimCodeUtil.simVarString(simVar) + "\n");
+          //print("  cref = " + ComponentReference.printComponentRefStr(cref) + "\n");
+          //print("  exp = " + ExpressionDump.printExpStr(exp) + "\n");
+
           simVarOperand = OPERAND_VAR(simVar);
           (assignOperand, operations, tmpIndex) = collectOperationsForExp(exp, crefToSimVarHT, operations, numVar);
           //print("Done with collectOperationsForExp\n");
+
+          if isTmpOperand(assignOperand) then
+            op::rest = operations;
+            op = replaceOperationResult(op, simVarOperand);
+            operations = op::rest;
+          else
+            op = OPERATION({assignOperand}, ASSIGN_ACTIVE(), simVarOperand);
+            operations = op::operations;
+          end if;
+        then();
+
+        //MF -- Algorithm --
+        //case SimCode.SES_ALGORITHM(index = index, statements = statements) equation
+        //  print("Algorithm! #Statements = " + intString(listLength(statements)) + " index = " + intString(index) + "\n");
+        //  extractExp(statements);
+        //  true = false;
+        //then ();
+
+        //MF -- Algorithm with assignment, e.g. z := cos(y) * 3.0
+        case SimCode.SES_ALGORITHM(index = index, statements = {DAE.STMT_ASSIGN(exp1 = DAE.CREF(componentRef = cref1), exp = exp2),
+                                                                DAE.STMT_ASSIGN(exp1 = DAE.CREF(componentRef = cref2), exp = exp4)}) equation
+          // exp1: z, exp: $_start(z)
+          simVar = BaseHashTable.get(cref1, crefToSimVarHT);
+          simVarOperand = OPERAND_VAR(simVar);
+          (assignOperand, operations, tmpIndex) = collectOperationsForExp(exp2, crefToSimVarHT, operations, numVar);
+          print("Done with collectOperationsForExp\n");
+
           if isTmpOperand(assignOperand) then
             op::rest = operations;
             op = replaceOperationResult(op, simVarOperand);
@@ -171,9 +210,24 @@ algorithm
             operations = op::operations;
           end if;
 
+          // exp1: z, exp: 3.0*cos(y)
+          simVar = BaseHashTable.get(cref2, crefToSimVarHT);
+          simVarOperand = OPERAND_VAR(simVar);
+          (assignOperand, operations, tmpIndex) = collectOperationsForExp(exp4, crefToSimVarHT, operations, numVar);
+          print("Done with collectOperationsForExp\n");
 
-        then ();
+          if isTmpOperand(assignOperand) then
+            op::rest = operations;
+            op = replaceOperationResult(op, simVarOperand);
+            operations = op::rest;
+          else
+            op = OPERATION({assignOperand}, ASSIGN_ACTIVE(), simVarOperand);
+            operations = op::operations;
+          end if;
+        then();
+
         //else ();
+
       end matchcontinue;
       maxTmpIndex := max(maxTmpIndex,tmpIndex);
     end for;
@@ -182,7 +236,72 @@ algorithm
   else
     outOperationData := NONE();
   end try;
+
+  //dumpOperationData(outOperationData);
 end createOperationData;
+
+//MF Just a test function. Can be removed in near future.
+protected function extractExp
+  input list<DAE.Statement> inStatements;
+algorithm
+  for st in inStatements loop
+    () := matchcontinue st
+      local
+        DAE.Exp exp, exp1;
+        DAE.Type type1;
+        DAE.ComponentRef compRef1, compRef2;
+        String typeStr, typeAttrStr;
+      case DAE.STMT_ASSIGN(type_ = type1, exp1 = exp1, exp = exp) equation
+        print("STMT_ASSIGN\n");
+        (typeStr, typeAttrStr) = DAEDump.printTypeStr(type1);
+        print("type : " + typeStr + " typeAttrStr " + typeAttrStr + " exp1: " + ExpressionDump.printExpStr(exp1) + " exp: " + ExpressionDump.printExpStr(exp) + "\n");
+        print("whatExp(exp1) " + whatExp(exp1) + "\n");
+        print("whatExp(exp) " + whatExp(exp) + "\n");
+        false = true;
+      then ();
+
+      // exp1: z, exp: $_start(z)
+      case DAE.STMT_ASSIGN(type_ = type1, exp1 = DAE.CREF(componentRef = compRef1), exp = DAE.CALL() ) equation
+        print("Yes!\n");
+      then ();
+
+      // exp1: z, exp: 3.0*y
+      case DAE.STMT_ASSIGN(type_ = type1, exp1 = DAE.CREF(componentRef = compRef1), exp = DAE.BINARY() ) equation
+        print("Yes1!\n");
+      then ();
+
+      case DAE.STMT_TUPLE_ASSIGN() equation
+        print("STMT_TUPLE_ASSIGN\n");
+      then ();
+
+      else equation
+        print("Else");
+      then();
+    end matchcontinue;
+  end for;
+end extractExp;
+
+
+protected function whatExp
+  "Return String containg the record type of a DAE.Exp."
+  input DAE.Exp inExp;
+  output String oStr;
+algorithm
+  oStr := matchcontinue inExp
+    case DAE.ICONST() then "ICONST";
+    case DAE.RCONST() then "RCONST";
+    case DAE.SCONST() then "SCONST";
+    case DAE.BCONST() then "BCONST";
+    case DAE.ENUM_LITERAL() then "ENUM_LITERAL";
+    case DAE.CREF() then "CREF";
+    case DAE.BINARY() then "BINARY";
+    case DAE.UNARY() then "UNARY";
+    case DAE.CALL() then "CALL";
+    case DAE.ASUB() then "ASUB";
+    else then "BLUBS";
+  end matchcontinue;
+end whatExp;
+
 
 protected function collectOperationsForExp
   input DAE.Exp inExp;
@@ -218,9 +337,10 @@ algorithm
       Operand opd1, opd2;
       Absyn.Ident ident;
       String str;
-
     case (e1 as DAE.RCONST(), (opds, ops, tmpIndex, crefToSimVarHT)) equation
       opds = OPERAND_CONST(e1)::opds;
+      //MF
+      //print("RCONST  \n");
     then
       (inExp, (opds, ops, tmpIndex, crefToSimVarHT));
 
@@ -229,10 +349,16 @@ algorithm
       operation = OPERATION({OPERAND_TIME()}, ASSIGN_PARAM(), OPERAND_VAR(resVar));
       ops = operation::ops;
       opds = OPERAND_VAR(resVar)::opds;
+      //MF
+      //print("TIME \n");
+      //print("Operation: " + printOperationStr(operation) + " Operand_var: " + SimCodeUtil.simVarString(resVar) + "\n");
     then
       (inExp, (opds, ops, tmpIndex, crefToSimVarHT));
 
     case (DAE.CREF(componentRef=cref, ty=ty), (opds, ops, tmpIndex, crefToSimVarHT)) equation
+      //MF
+      //print("Cref with type = " + Types.printTypeStr(ty) + "\n");
+
       paramVar = BaseHashTable.get(cref, crefToSimVarHT);
       //guard
       BackendDAE.PARAM() = paramVar.varKind;
@@ -246,6 +372,8 @@ algorithm
     case (DAE.CREF(componentRef=cref), (opds, ops, tmpIndex, crefToSimVarHT)) equation
       resVar = BaseHashTable.get(cref, crefToSimVarHT);
       opds = OPERAND_VAR(resVar)::opds;
+      //MF
+      //print("Cref without type \n");
     then
       (inExp, (opds, ops, tmpIndex, crefToSimVarHT));
 
@@ -254,6 +382,8 @@ algorithm
       cref = ComponentReference.crefPrefixDer(resVar.name);
       resVar = BaseHashTable.get(cref, crefToSimVarHT);
       opds = OPERAND_VAR(resVar)::rest;
+      //MF
+      //print("Der \n");
     then
       (inExp, (opds, ops, tmpIndex, crefToSimVarHT));
 
@@ -261,6 +391,8 @@ algorithm
       opd2::opd1::rest = opds;
       (operation, result, tmpIndex) = createBinaryOperation(op, {opd1,opd2}, tmpIndex);
       ops = operation::ops;
+      //MF
+      //print("Binary operator\n");
     then
       (inExp, (result::rest, ops, tmpIndex, crefToSimVarHT));
 
@@ -269,6 +401,8 @@ algorithm
       opd2::opd1::rest = opds;
       (operation, result, tmpIndex) = createBinaryOperation(op, {opd1,opd2}, tmpIndex);
       ops = operation::ops;
+      //MF
+      //print("Division\n");
     then
       (inExp, (result::rest, ops, tmpIndex, crefToSimVarHT));
 
@@ -280,6 +414,8 @@ algorithm
       result = OPERAND_VAR(resVar);
       operation = OPERATION({opd1}, UNARY_CALL(ident), result);
       ops = operation::ops;
+      //MF
+      //print("IsMathFunction \n");
     then
       (inExp, (result::rest, ops, tmpIndex, crefToSimVarHT));
 
@@ -292,6 +428,8 @@ algorithm
       result = OPERAND_VAR(resVar);
       operation = OPERATION({opd1,OPERAND_VAR(extraVar)}, UNARY_CALL(ident), result);
       ops = operation::ops;
+      //MF
+      //print("IsTrigMathFunction \n");
     then
       (inExp, (result::rest, ops, tmpIndex, crefToSimVarHT));
 
@@ -302,6 +440,8 @@ algorithm
       result = OPERAND_VAR(resVar);
       operation = OPERATION({opd1}, UNARY_NEG(), result);
       ops = operation::ops;
+      //MF
+      //print("Unary \n");
     then
       (inExp, (result::rest, ops, tmpIndex, crefToSimVarHT));
 
@@ -585,6 +725,7 @@ algorithm
 
   end match;
 end printOperatorStr;
+
 
 
 annotation(__OpenModelica_Interface="backend");
