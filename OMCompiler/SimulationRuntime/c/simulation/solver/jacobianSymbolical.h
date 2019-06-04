@@ -34,7 +34,7 @@
 #ifndef OMC_JACOBIAN_SYMBOLICAL_H
 #define OMC_JACOBIAN_SYMBOLICAL_H
 
-#include "simulation_data.h"
+#include "../../simulation_data.h"
 
 
 /* Allocate thread local Jacobians in case of OpenMP-parallel Jacobian computation (symbolical only) in IDA and Dassl.*/
