@@ -1,0 +1,24 @@
+// name: parallelJacobian
+// keywords: OpenMP parallel jacobian c-runtime
+// status: correct
+// teardown_command: rm -rf Modelica.Electrical.Analog.Examples.CauerLowPassAnalog*
+//
+//
+// Tests parallel evaluation of jacobian using OpenMP
+//
+
+
+loadModel(Modelica); getErrorString();
+
+setCommandLineOptions("--generateSymbolicJacobian");
+
+buildModel(Modelica.Electrical.Analog.Examples.CauerLowPassAnalog); getErrorString();
+
+// Test with symbolical jacobian
+system(realpath(".") + "/Modelica.Electrical.Analog.Examples.CauerLowPassAnalog -jacobian=symbolical -lv LOG_STATS_V -jacobianThreads=$(nproc)", "Modelica.Electrical.Analog.Examples.CauerLowPassAnalog_call_1.log"); getErrorString();
+readFile("Modelica.Electrical.Analog.Examples.CauerLowPassAnalog_call_1.log"); getErrorString();
+
+// Test with colored jacobian
+system(realpath(".") + "/Modelica.Electrical.Analog.Examples.CauerLowPassAnalog -jacobian=coloredSymbolica -lv LOG_STATS_V -jacobianThreads=$(nproc)", "Modelica.Electrical.Analog.Examples.CauerLowPassAnalog_call_2.log"); getErrorString();
+readFile("Modelica.Electrical.Analog.Examples.CauerLowPassAnalog_call_2.log"); getErrorString();
+
