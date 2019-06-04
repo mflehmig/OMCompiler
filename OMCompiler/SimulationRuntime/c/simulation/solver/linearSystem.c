@@ -48,10 +48,15 @@
 #include "linearSolverTotalPivot.h"
 #include "../simulation_info_json.h"
 
+#ifdef USE_PARJAC
+  #include <omp.h>
+#endif
+
 static void setAElement(int row, int col, double value, int nth, void *data, threadData_t *);
 static void setAElementLis(int row, int col, double value, int nth, void *data, threadData_t *);
 static void setAElementUmfpack(int row, int col, double value, int nth, void *data, threadData_t *);
 static void setAElementKlu(int row, int col, double value, int nth, void *data, threadData_t *);
+static void setAElementKluSD(int row, int col, double value, int nth, void *solverData, threadData_t *threadData);
 static void setBElement(int row, double value, void *data, threadData_t*);
 static void setBElementLis(int row, double value, void *data, threadData_t*);
 
@@ -66,7 +71,7 @@ int check_linear_solution(DATA *data, int printFailingSystems, int sysNumber);
 int initializeLinearSystems(DATA *data, threadData_t *threadData)
 {
   TRACE_PUSH
-  int i, nnz;
+  int i, nnz, j;
   int size;
   LINEAR_SYSTEM_DATA *linsys = data->simulationInfo->linearSystemData;
 
@@ -105,7 +110,7 @@ int initializeLinearSystems(DATA *data, threadData_t *threadData)
         linsys[i].jacobianIndex = -1;
         throwStreamPrint(threadData, "Failed to initialize the jacobian for torn linear system %d.", (int)linsys[i].equationIndex);
       }
-      nnz = jacobian->sparsePattern.numberOfNoneZeros;
+      nnz = jacobian->sparsePattern->numberOfNoneZeros;
       linsys[i].nnz = nnz;
     }
 
@@ -114,6 +119,12 @@ int initializeLinearSystems(DATA *data, threadData_t *threadData)
       linsys[i].useSparseSolver = 1;
       infoStreamPrint(LOG_STDOUT, 0, "Using sparse solver for linear system %d,\nbecause density of %.3f remains under threshold of %.3f and size of %d exceeds threshold of %d.\nThe maximum density and the minimal system size for using sparse solvers can be specified\nusing the runtime flags '<-lssMaxDensity=value>' and '<-lssMinSize=value>'.", i, nnz/(double)(size*size), linearSparseSolverMaxDensity, size, linearSparseSolverMinSize);
     }
+
+#ifdef USE_PARJAC
+    linsys[i].parentJacobian = (ANALYTIC_JACOBIAN**) malloc(omp_get_max_threads()*sizeof(ANALYTIC_JACOBIAN*));
+    printf("#2 OPENMP is defined\n");
+    printf("#2 omp_get_max_threads() = %i\n", omp_get_max_threads());
+#endif
 
     /* allocate more system data */
     linsys[i].nominal = (double*) malloc(size*sizeof(double));
@@ -135,9 +146,19 @@ int initializeLinearSystems(DATA *data, threadData_t *threadData)
         allocateUmfPackData(size, size, nnz, linsys[i].solverData);
         break;
       case LSS_KLU:
-        linsys[i].setAElement = setAElementKlu;
         linsys[i].setBElement = setBElement;
+        linsys[i].setAElement = setAElementKlu;
+#ifndef USE_PARJAC
         allocateKluData(size, size, nnz, linsys[i].solverData);
+#else
+        linsys[i].setAElement = setAElementKluSD;
+        // create parSolverData
+        linsys[i].parSolverData = (void**) malloc(sizeof(void*)*omp_get_max_threads());
+        for(j=0;j<omp_get_max_threads();j++){
+          allocateKluData(size, size, nnz, &(linsys[i].parSolverData[j]));
+          ((linsys[i].initialAnalyticalJacobian))(data, threadData, ((DATA_KLU*)linsys[i].parSolverData[j])->matrixA);
+        }
+#endif
         break;
     #else
       case LSS_KLU:
@@ -173,10 +194,9 @@ int initializeLinearSystems(DATA *data, threadData_t *threadData)
     switch(data->simulationInfo->lsMethod)
     {
       case LS_LAPACK:
-        linsys[i].A = (double*) malloc(size*size*sizeof(double));
         linsys[i].setAElement = setAElement;
         linsys[i].setBElement = setBElement;
-        allocateLapackData(size, linsys[i].solverData);
+        //allocateLapackData(size, linsys[i].solverData);
         break;
 
     #if !defined(OMC_MINIMAL_RUNTIME)
@@ -193,9 +213,20 @@ int initializeLinearSystems(DATA *data, threadData_t *threadData)
         allocateUmfPackData(size, size, nnz, linsys[i].solverData);
         break;
       case LS_KLU:
-        linsys[i].setAElement = setAElementKlu;
         linsys[i].setBElement = setBElement;
+        linsys[i].setAElement = setAElementKlu;
+#ifndef USE_PARJAC
         allocateKluData(size, size, nnz, linsys[i].solverData);
+#else
+        linsys[i].setAElement = setAElementKluSD;
+        // create parSolverData
+        linsys[i].parSolverData = (void**) malloc(sizeof(void*)*omp_get_max_threads());
+        for(j=0;j<omp_get_max_threads();j++){
+          allocateKluData(size, size, nnz, &(linsys[i].parSolverData[j]));
+          ((linsys[i].initialAnalyticalJacobian))(data, threadData, ((DATA_KLU*)linsys[i].parSolverData[j])->matrixA);
+        }
+
+#endif
         break;
     #else
       case LS_UMFPACK:
@@ -211,12 +242,11 @@ int initializeLinearSystems(DATA *data, threadData_t *threadData)
         break;
 
       case LS_DEFAULT:
-        linsys[i].A = (double*) malloc(size*size*sizeof(double));
         linsys[i].setAElement = setAElement;
         linsys[i].setBElement = setBElement;
 
-        allocateLapackData(size, linsys[i].solverData);
-        allocateTotalPivotData(size, linsys[i].solverData);
+        //allocateLapackData(size, linsys[i].solverData);
+        //allocateTotalPivotData(size, linsys[i].solverData);
 
         break;
 
@@ -287,7 +317,7 @@ void printLinearSystemSolvingStatistics(DATA *data, int sysNumber, int logLevel)
 int freeLinearSystems(DATA *data, threadData_t *threadData)
 {
   TRACE_PUSH
-  int i;
+  int i,j;
   LINEAR_SYSTEM_DATA* linsys = data->simulationInfo->linearSystemData;
 
   infoStreamPrint(LOG_LS_V, 1, "free linear system solvers");
@@ -298,6 +328,10 @@ int freeLinearSystems(DATA *data, threadData_t *threadData)
     free(linsys[i].nominal);
     free(linsys[i].min);
     free(linsys[i].max);
+
+#ifdef USE_PARJAC
+    free(linsys[i].parentJacobian);
+#endif
 
     if(linsys[i].useSparseSolver == 1)
     {
@@ -314,7 +348,14 @@ int freeLinearSystems(DATA *data, threadData_t *threadData)
         freeUmfPackData(linsys[i].solverData);
         break;
       case LSS_KLU:
+#ifndef USE_PARJAC
         freeKluData(linsys[i].solverData);
+#else
+        for(j=0;j<omp_get_max_threads();j++){
+          freeKluData((void*)&(linsys[i].parSolverData[j]));
+        }
+        free(linsys[i].parSolverData);
+#endif
         break;
     #else
       case LSS_UMFPACK:
@@ -331,8 +372,8 @@ int freeLinearSystems(DATA *data, threadData_t *threadData)
       switch(data->simulationInfo->lsMethod)
       {
       case LS_LAPACK:
-        freeLapackData(linsys[i].solverData);
-        free(linsys[i].A);
+        //freeLapackData(linsys[i].solverData);
+        //free(linsys[i].A);
         break;
 
   #if !defined(OMC_MINIMAL_RUNTIME)
@@ -346,7 +387,14 @@ int freeLinearSystems(DATA *data, threadData_t *threadData)
         freeUmfPackData(linsys[i].solverData);
         break;
       case LS_KLU:
+#ifndef USE_PARJAC
         freeKluData(linsys[i].solverData);
+#else
+        for(j=0;j<omp_get_max_threads();j++){
+          freeKluData((void*)&(linsys[i].parSolverData[j]));
+        }
+        free(linsys[i].parSolverData);
+#endif
         break;
   #else
       case LS_UMFPACK:
@@ -360,9 +408,9 @@ int freeLinearSystems(DATA *data, threadData_t *threadData)
         break;
 
       case LS_DEFAULT:
-        free(linsys[i].A);
-        freeLapackData(linsys[i].solverData);
-        freeTotalPivotData(linsys[i].solverData);
+        //free(linsys[i].A);
+        //freeLapackData(linsys[i].solverData);
+        //freeTotalPivotData(linsys[i].solverData);
         break;
 
       default:
@@ -378,6 +426,7 @@ int freeLinearSystems(DATA *data, threadData_t *threadData)
       free(linsys[i].solverData[1]);
       linsys[i].solverData[1] = 0;
     }
+
   }
 
   messageClose(LOG_LS_V);
@@ -402,9 +451,6 @@ int solve_linear_system(DATA *data, threadData_t *threadData, int sysNumber, dou
   LINEAR_SYSTEM_DATA* linsys = &(data->simulationInfo->linearSystemData[sysNumber]);
 
   rt_ext_tp_tick(&(linsys->totalTimeClock));
-
-  /* enable to avoid division by zero */
-  data->simulationInfo->noThrowDivZero = 1;
 
   if(linsys->useSparseSolver == 1)
   {
@@ -487,7 +533,7 @@ int solve_linear_system(DATA *data, threadData_t *threadData, int sysNumber, dou
           success=2;
           linsys->failed = 0;
         }
-        else{
+        else {
           linsys->failed = 1;
         }
       }
@@ -502,7 +548,7 @@ int solve_linear_system(DATA *data, threadData_t *threadData, int sysNumber, dou
         warningStreamPrint(logLevel, 0, "The default linear solver fails, the fallback solver with total pivoting is started at time %f. That might raise performance issues, for more information use -lv LOG_LS.", data->localData[0]->timeValue);
         success = solveTotalPivot(data, threadData, sysNumber, aux_x);
         linsys->failed = 1;
-      }else{
+      } else {
         linsys->failed = 0;
       }
       }
@@ -513,10 +559,11 @@ int solve_linear_system(DATA *data, threadData_t *threadData, int sysNumber, dou
     }
   }
   linsys->solved = success;
-
-  linsys->totalTime += rt_ext_tp_tock(&(linsys->totalTimeClock));
-  linsys->numberOfCall++;
-
+#pragma omp critical
+  {
+    linsys->totalTime += rt_ext_tp_tock(&(linsys->totalTimeClock));
+    linsys->numberOfCall++;
+  }
   retVal = check_linear_solution(data, 1, sysNumber);
 
   TRACE_POP
@@ -691,4 +738,19 @@ static void setAElementKlu(int row, int col, double value, int nth, void *data, 
   sData->Ai[nth] = col;
   sData->Ax[nth] = value;
 }
+static void setAElementKluSD(int row, int col, double value, int nth, void *solverData, threadData_t *threadData)
+{
+  DATA_KLU* sData = (DATA_KLU*) solverData;
+
+  if (row > 0){
+    if (sData->Ap[row] == 0){
+      sData->Ap[row] = nth;
+    }
+  }
+
+  sData->Ai[nth] = col;
+  sData->Ax[nth] = value;
+}
+
+
 #endif

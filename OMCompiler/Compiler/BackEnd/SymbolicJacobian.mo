@@ -2671,9 +2671,17 @@ algorithm
 
       then (BackendDAE.TORNSYSTEM(strictTearingset, optCasualTearingSet, linear, mixedSystem), shared);
 
-      // do not touch linear and constant systems for now
+      // do not touch constant systems for now
       case (comp as BackendDAE.EQUATIONSYSTEM(jacType=BackendDAE.JAC_CONSTANT()), _, _, _) then (comp, inShared);
-      case (comp as BackendDAE.EQUATIONSYSTEM(jacType=BackendDAE.JAC_LINEAR()), _, _, _) then (comp, inShared);
+      //case (comp as BackendDAE.EQUATIONSYSTEM(jacType=BackendDAE.JAC_LINEAR()), _, _, _) then (comp, inShared);
+
+      // convert linear system to a tearing system
+      case (comp as BackendDAE.EQUATIONSYSTEM(jacType=BackendDAE.JAC_LINEAR(), eqns=residualequations, vars=iterationvarsInts, mixedSystem=mixedSystem), _, _, _)
+        equation
+          strictTearingset = BackendDAE.TEARINGSET(iterationvarsInts, residualequations, {}, BackendDAE.EMPTY_JACOBIAN());
+          (jacobian, shared) = calculateTearingSetJacobian(inVars, inEqns, strictTearingset, inShared, true);
+          strictTearingset.jac = jacobian;
+      then (BackendDAE.TORNSYSTEM(strictTearingset, NONE(), true, mixedSystem), shared);
 
       case (BackendDAE.EQUATIONSYSTEM(eqns=residualequations, vars=iterationvarsInts, mixedSystem=mixedSystem), _, _, _)
         equation

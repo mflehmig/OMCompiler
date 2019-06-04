@@ -199,7 +199,7 @@ static void resetKinsolMemory(NLS_KINSOL_DATA *kinsolData, NONLINEAR_SYSTEM_DATA
   {
     if(nlsData->isPatternAvailable)
     {
-      kinsolData->nnz = nlsData->sparsePattern.numberOfNoneZeros;
+      kinsolData->nnz = nlsData->sparsePattern->numberOfNoneZeros;
       flag = KINKLU(kinsolData->kinsolMemory, size, kinsolData->nnz);
       if (checkReturnFlag(flag)){
         errorStreamPrint(LOG_STDOUT, 0, "##KINSOL## Something goes wrong while initialize KINSOL solver!");
@@ -453,7 +453,7 @@ int nlsSparseJac(N_Vector vecX, N_Vector vecFX, SlsMat Jac, void *userData, N_Ve
   double *xScaling = NV_DATA_S(kinsolData->xScale);
   double *fRes = NV_DATA_S(kinsolData->fRes);
 
-  SPARSE_PATTERN* sparsePattern = &(nlsData->sparsePattern);
+  SPARSE_PATTERN* sparsePattern = nlsData->sparsePattern;
 
   const double delta_h = sqrt(DBL_EPSILON*2e1);
 
@@ -544,7 +544,7 @@ int nlsSparseSymJac(N_Vector vecX, N_Vector vecFX, SlsMat Jac, void *userData, N
   double *fx = N_VGetArrayPointer(vecFX);
   double *xScaling = NV_DATA_S(kinsolData->xScale);
 
-  SPARSE_PATTERN* sparsePattern = &(nlsData->sparsePattern);
+  SPARSE_PATTERN* sparsePattern = nlsData->sparsePattern;
   ANALYTIC_JACOBIAN* analyticJacobian = &data->simulationInfo->analyticJacobians[nlsData->jacobianIndex];
 
   long int i,j,ii;

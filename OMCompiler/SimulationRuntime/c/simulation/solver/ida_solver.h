@@ -107,6 +107,10 @@ typedef struct IDA_SOLVER
   N_Vector* ySp;
   N_Vector* ySResult;
 
+#ifdef USE_PARJAC
+  ANALYTIC_JACOBIAN* jacColumns;
+#endif
+
 }IDA_SOLVER;
 
 /* initial main ida Data */
@@ -125,6 +129,7 @@ ida_solver_step(DATA* simData, threadData_t *threadData, SOLVER_INFO* solverInfo
 int
 ida_event_update(DATA* data, threadData_t *threadData);
 
+static void setJacElementKluSparse_neu(int row, int col, int nth, double value, void* spJac, int rows);
 #endif
 
 #endif

@@ -148,7 +148,7 @@ typedef struct ANALYTIC_JACOBIAN
   unsigned int sizeCols;
   unsigned int sizeRows;
   unsigned int sizeTmpVars;
-  SPARSE_PATTERN sparsePattern;
+  SPARSE_PATTERN* sparsePattern;
   modelica_real* seedVars;
   modelica_real* tmpVars;
   modelica_real* resultVars;
@@ -272,7 +272,7 @@ typedef struct NONLINEAR_SYSTEM_DATA
   int (*initialAnalyticalJacobian)(void*, threadData_t*, ANALYTIC_JACOBIAN*);
   modelica_integer jacobianIndex;
 
-  SPARSE_PATTERN sparsePattern;        /* sparse pattern if no jacobian is available */
+  SPARSE_PATTERN *sparsePattern;        /* sparse pattern if no jacobian is available */
   modelica_boolean isPatternAvailable;
 
   void (*residualFunc)(void**, const double*, double*, const int*);
@@ -339,6 +339,7 @@ typedef struct LINEAR_SYSTEM_DATA
   modelica_integer equationIndex;       /* index for EQUATION_INFO */
 
   void *solverData[2]; /* [1] is the totalPivot solver; [0] holds other solvers ; both are used for the default solver */
+  void** parSolverData;
   modelica_real *x;                     /* solution vector x */
   modelica_real *A;                     /* matrix A */
   modelica_real *b;                     /* vector b */
@@ -348,7 +349,11 @@ typedef struct LINEAR_SYSTEM_DATA
   modelica_boolean solved;              /* 1: solved in current step - else not */
   modelica_boolean failed;              /* 1: failed while last try with lapack - else not */
   modelica_boolean useSparseSolver;     /* 1: use sparse solver, - else any solver */
-  ANALYTIC_JACOBIAN* parentJacobian; 	/* if != NULL then it's the parent jacobian matrix */
+#ifdef USE_PARJAC
+  ANALYTIC_JACOBIAN** parentJacobian;    /* if != NULL then it's the parent jacobian matrix */
+#else
+  ANALYTIC_JACOBIAN* parentJacobian;    /* if != NULL then it's the parent jacobian matrix */
+#endif
 
   /* statistics */
   unsigned long numberOfCall;           /* number of solving calls of this system */

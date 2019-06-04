@@ -54,6 +54,8 @@ typedef struct DATA_KLU
   klu_common common;
 
   double* work;
+  double* b;
+  ANALYTIC_JACOBIAN* matrixA;
 
   rtclock_t timeClock;             /* time clock */
   int numberSolving;

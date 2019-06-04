@@ -31,6 +31,10 @@
 /*! \file linearSolverLis.c
  */
 
+#ifdef USE_PARJAC
+  #include <omp.h>
+#endif
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -143,25 +147,32 @@ int getAnalyticalJacobianLis(DATA* data, threadData_t *threadData, int sysNumber
   LINEAR_SYSTEM_DATA* systemData = &(((DATA*)data)->simulationInfo->linearSystemData[sysNumber]);
 
   const int index = systemData->jacobianIndex;
+#ifdef USE_PARJAC
+  ANALYTIC_JACOBIAN* jacobian = (ANALYTIC_JACOBIAN*) malloc(sizeof(ANALYTIC_JACOBIAN));
+  ((systemData->initialAnalyticalJacobian))(data, threadData, jacobian);
+  ANALYTIC_JACOBIAN* parentJacobian = systemData->parentJacobian[omp_get_thread_num()];
+#else
   ANALYTIC_JACOBIAN* jacobian = &(data->simulationInfo->analyticJacobians[systemData->jacobianIndex]);
+  ANALYTIC_JACOBIAN* parentJacobian = systemData->parentJacobian;
+#endif
 
   int nth = 0;
-  int nnz = jacobian->sparsePattern.numberOfNoneZeros;
+  int nnz = jacobian->sparsePattern->numberOfNoneZeros;
 
   for(i=0; i < jacobian->sizeRows; i++)
   {
     jacobian->seedVars[i] = 1;
 
-    ((systemData->analyticalJacobianColumn))(data, threadData, jacobian, systemData->parentJacobian);
+    ((systemData->analyticalJacobianColumn))(data, threadData, jacobian, parentJacobian);
 
     for(j = 0; j < jacobian->sizeCols; j++)
     {
       if(jacobian->seedVars[j] == 1)
       {
-        ii = jacobian->sparsePattern.leadindex[j-1];
-        while(ii < jacobian->sparsePattern.leadindex[j+1])
+        ii = jacobian->sparsePattern->leadindex[j-1];
+        while(ii < jacobian->sparsePattern->leadindex[j+1])
         {
-          l  = jacobian->sparsePattern.index[ii];
+          l  = jacobian->sparsePattern->index[ii];
           /*infoStreamPrint(LOG_LS_V, 0, "set on Matrix A (%d, %d)(%d) = %f", i, l, nth, -jacobian->resultVars[l]); */
           systemData->setAElement(i, l, -jacobian->resultVars[l], nth, (void*) systemData, threadData);
           nth++;
