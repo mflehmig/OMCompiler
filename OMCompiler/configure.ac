@@ -477,7 +477,7 @@ if test x$want_parjac = xyes; then
   AC_MSG_CHECKING([for parallel Jacobian evaluation])
   if test "$CONFIG_WITH_OPENMP=1"; then
     USE_PARJAC="yes"
-    RUNTIMECFLAGS="$RUNTIMECFLAGS -DUSE_PARJAC"
+    RUNTIMECFLAGS="$RUNTIMECFLAGS $OMPCFLAGS -DUSE_PARJAC"
   else
     AC_MSG_WARN([========= OpenMP is not available, not define par. jac])
   fi
